@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitoring Week 2 Mesin</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+body{margin:0;font-family:Arial,sans-serif;background:#f5f7fa;color:#222;}
+header{background:#1e5bb8;color:#fff;padding:16px 20px;font-weight:700;font-size:20px;}
+.wrap{padding:18px 20px;}
+.section-title{color:#1e5bb8;font-weight:700;margin:12px 0;}
+.card{background:#fff;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);margin-bottom:18px;}
+.item{padding:6px 0;border-bottom:1px solid #eee;}
+.item:last-child{border-bottom:none;}
+.count-label{font-size:13px;color:#333;margin-bottom:8px;}
+.btn{background:#1e5bb8;color:#fff;border:none;padding:8px 12px;border-radius:6px;cursor:pointer;}
+</style>
+</head>
+<body>
+<header>Dashboard Monitoring Mesin - Week 2</header>
+<div class="wrap">
+
+  <div class="card">
+    <div class="section-title">Mesin Week 2</div>
+    <div class="count-label" id="countW2">Total: 0 mesin</div>
+    <div id="week2List">—</div>
+  </div>
+
+  <button class="btn" id="btnExport">Export to Excel</button>
+</div>
+
+<script>
+const CSV_MASTER = "data_mesin_100.csv"; // 100 mesin cabang
+const CSV_SHEET = "https://docs.google.com/spreadsheets/d/19FeEccnYkZVAZo0lO-erbgLtJDAalG3IzwaiLympdck/gviz/tq?tqx=out:csv&sheet=Form%20Responses%201";
+
+let mesinCabang=[], week2List=[];
+
+function safeText(t){return t==null?"":String(t).trim().toUpperCase();}
+
+function renderList(){
+  const el=document.getElementById("week2List");
+  if(!week2List.length){el.innerHTML="<i>Tidak ada data Week 2</i>"; return;}
+  el.innerHTML = week2List.map(m=>`<div class="item"><strong>${m.id}</strong> — ${m.sektor} <br><small>${m.timestamp}</small></div>`).join("");
+  document.getElementById("countW2").innerText = `Total: ${week2List.length} mesin`;
+}
+
+function requestNotification(){
+  if("Notification" in window && Notification.permission!=="granted") Notification.requestPermission();
+}
+
+function loadWeek2(){
+  Papa.parse(CSV_MASTER,{download:true,header:true,skipEmptyLines:true,complete:function(resMaster){
+    mesinCabang=resMaster.data;
+    Papa.parse(CSV_SHEET,{download:true,header:true,skipEmptyLines:true,complete:function(resSheet){
+      const sheetData=resSheet.data;
+      const idCol=Object.keys(sheetData[0]||{}).find(k=>k.toLowerCase().includes("id mesin"))||"ID Mesin";
+      const weekCol=Object.keys(sheetData[0]||{}).find(k=>k.toLowerCase().includes("week"))||"WEEK";
+
+      week2List=[];
+      const newIds=[];
+
+      mesinCabang.forEach(m=>{
+        const idMaster = safeText(m["TERMINAL ID"]);
+        const sektor = m["SEKTOR"];
+        const match = sheetData.find(d=>safeText(d[idCol])===idMaster);
+        if(match && safeText(match[weekCol])==="WEEK 2"){
+          week2List.push({id:idMaster,sektor,timestamp:match["Timestamp"]});
+          newIds.push(idMaster);
+          console.log(`Week 2 MATCH: ${idMaster}`);
+        }
+      });
+
+      renderList();
+
+      // notifikasi
+      if(Notification.permission==="granted" && newIds.length>0){
+        new Notification("Mesin baru Week 2 terinput!", {body: newIds.join(", ")});
+      }
+    }});
+  }});
+}
+
+// Export Excel
+document.getElementById("btnExport").addEventListener("click",()=>{
+  const wb=XLSX.utils.book_new();
+  const wsData=week2List.map(m=>({ID_Mesin:m.id,Sektor:m.sektor,Week:"2",Timestamp:m.timestamp}));
+  const ws=XLSX.utils.json_to_sheet(wsData);
+  XLSX.utils.book_append_sheet(wb,ws,"Week2");
+  XLSX.writeFile(wb,`Week2_Mesin_${new Date().toISOString().slice(0,10)}.xlsx`);
+});
+
+requestNotification();
+loadWeek2();
+setInterval(loadWeek2,600000); // refresh tiap 10 menit
+</script>
+</body>
+</html>
