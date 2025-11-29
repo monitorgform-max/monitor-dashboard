@@ -1,116 +1,244 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <title>Dashboard Mesin</title>
-  <style>
-    body { font-family: Arial; padding: 20px; }
-    h1 { margin-bottom: 5px; }
-    .week-box { margin-bottom: 40px; padding: 15px; border: 1px solid #ccc; border-radius: 10px; }
-    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
-    th, td { border: 1px solid #888; padding: 6px; text-align: left; }
-    th { background: #f2f2f2 }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dashboard Monitoring Mesin - Final Robust</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;background:#f5f7fa;color:#222;margin:0}
+  header{background:#1e5bb8;color:#fff;padding:14px 18px;font-weight:700}
+  .wrap{padding:16px}
+  .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+  .btn{background:#1e5bb8;color:#fff;border:none;padding:8px 10px;border-radius:6px;cursor:pointer}
+  .week-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  .card{background:#fff;padding:10px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,0.06);min-height:160px;overflow:auto}
+  .item{padding:6px 0;border-bottom:1px solid #eee}
+  small{color:#666}
+</style>
 </head>
-
 <body>
+<header>Dashboard Monitoring Input Mesin (Final)</header>
+<div class="wrap">
+  <div class="controls">
+    <button class="btn" id="btnExport">Export Excel</button>
+    <button class="btn" id="btnRefresh">Refresh Now</button>
+    <div style="margin-left:8px;color:#666;font-size:13px">Auto-refresh 10 menit — shows Timestamp, ID Mesin, Nama Lokasi, WEEK, SEKTOR</div>
+  </div>
 
-<h1>Dashboard Mesin � Mingguan</h1>
-<p>Auto update dari GitHub (no cache)</p>
+  <div class="week-grid">
+    <div class="card" id="cardW1"><h4>WEEK 1</h4><div id="sudahW1">—</div><div id="countSW1" style="margin-top:8px"></div></div>
+    <div class="card" id="cardW2"><h4>WEEK 2</h4><div id="sudahW2">—</div><div id="countSW2" style="margin-top:8px"></div></div>
+    <div class="card" id="cardW3"><h4>WEEK 3</h4><div id="sudahW3">—</div><div id="countSW3" style="margin-top:8px"></div></div>
+    <div class="card" id="cardW4"><h4>WEEK 4</h4><div id="sudahW4">—</div><div id="countSW4" style="margin-top:8px"></div></div>
+  </div>
 
-<div id="container"></div>
+  <h3 style="margin-top:18px">Belum Terinput</h3>
+  <div class="week-grid" style="margin-bottom:18px">
+    <div class="card"><h4>W1</h4><div id="belumW1">—</div><div id="countBW1"></div></div>
+    <div class="card"><h4>W2</h4><div id="belumW2">—</div><div id="countBW2"></div></div>
+    <div class="card"><h4>W3</h4><div id="belumW3">—</div><div id="countBW3"></div></div>
+    <div class="card"><h4>W4</h4><div id="belumW4">—</div><div id="countBW4"></div></div>
+  </div>
+
+  <div id="chartWrap" style="background:#fff;padding:12px;border-radius:8px">
+    <h4>Grafik per SEKTOR</h4>
+    <canvas id="chartSektor" height="120"></canvas>
+  </div>
+</div>
 
 <script>
-// =============== CONFIG =================
-const DATA_MESIN_URL = "https://raw.githubusercontent.com/USERNAME/REPO/main/data_mesin_100.csv";
-const FORM_DATA_URL  = "https://raw.githubusercontent.com/USERNAME/REPO/main/Data%20Mesin.csv";
-// ========================================
+/* CONFIG */
+const MASTER_CSV = "Data Mesin.csv"; // must exist in repo root (exact name)
+const SHEET_ID = "19FeEccnYkZVAZo0lO-erbgLtJDAalG3IzwaiLympdck";
+const SHEET_NAME = "Form Responses 1";
+const FORM_URL = `https://opensheet.elk.sh/${SHEET_ID}/${encodeURIComponent(SHEET_NAME)}`;
 
-// Fetch CSV tanpa cache
-async function fetchCSV(url) {
-    const res = await fetch(url + "?t=" + Date.now());
-    return await res.text();
+/* helpers */
+function getCol(obj, name){
+  if(!obj) return "";
+  const target = name.toLowerCase().trim();
+  for(const k in obj) if(k.toLowerCase().trim() === target) return obj[k];
+  return "";
+}
+function safe(v){ return v==null ? "" : String(v).trim(); }
+function parseWeek(raw){
+  if(!raw) return 1;
+  const m = String(raw).match(/\d+/);
+  const n = m ? parseInt(m[0],10) : 1;
+  return (!isNaN(n) && n>=1 && n<=4) ? n : 1;
+}
+function tsMs(ts){
+  if(!ts) return 0;
+  const parsed = Date.parse(ts);
+  if(!isNaN(parsed)) return parsed;
+  const alt = Date.parse(ts.replace(" ", "T"));
+  return isNaN(alt) ? 0 : alt;
 }
 
-// Convert CSV ? array object
-function parseCSV(text) {
-    const rows = text.trim().split("\n").map(r => r.split(","));
-    const header = rows[0].map(h => h.trim());
-    return rows.slice(1).map(row => {
-        let obj = {};
-        row.forEach((val, i) => obj[header[i]] = val.trim());
-        return obj;
+/* state */
+let masterList = []; // array of master rows (may include SEKTOR)
+let formRows = [];   // raw form rows from opensheet
+let latestById = {}; // id -> best form record (latest timestamp)
+let chart = null;
+
+async function loadMaster(){
+  return new Promise(resolve=>{
+    Papa.parse(MASTER_CSV, { download:true, header:true, skipEmptyLines:true,
+      complete: r => { masterList = Array.isArray(r.data) ? r.data.filter(x=>safe(getCol(x,"ID Mesin"))!=="") : []; console.log("master count:", masterList.length); resolve(); },
+      error: e => { console.warn("failed load master:", e); masterList = []; resolve(); }
     });
+  });
 }
 
-// Render data per week
-function renderWeek(weekLabel, data) {
-    let html = `
-        <div class="week-box">
-            <h2>${weekLabel}</h2>
-            <p>Total: ${data.length} mesin</p>
-            <table>
-                <tr>
-                    <th>Timestamp</th>
-                    <th>ID Mesin</th>
-                    <th>Nama Lokasi</th>
-                    <th>Week</th>
-                    <th>Sektor</th>
-                </tr>
-    `;
-    data.forEach(d => {
-        html += `
-            <tr>
-                <td>${d["Timestamp"] || "-"}</td>
-                <td>${d["ID Mesin"]}</td>
-                <td>${d["Nama Lokasi"]}</td>
-                <td>${d["WEEK"]}</td>
-                <td>${d["SEKTOR"]}</td>
-            </tr>
-        `;
+async function loadForm(){
+  try{
+    const res = await fetch(FORM_URL, {cache:"no-store"});
+    formRows = await res.json();
+    if(!Array.isArray(formRows)) formRows = [];
+    console.log("form rows:", formRows.length);
+  }catch(e){
+    console.error("failed fetch form:", e);
+    formRows = [];
+  }
+}
+
+/* build latestById from formRows */
+function buildLatest(){
+  latestById = {};
+  for(const r of formRows){
+    const id = safe(getCol(r,"ID Mesin"));
+    if(!id) continue;
+    const ts = safe(getCol(r,"Timestamp"));
+    const ms = ts ? Date.parse(ts) || (Date.parse(ts.replace(" ","T"))||0) : 0;
+    if(!(id in latestById) || ms > latestById[id].ms){
+      latestById[id] = {
+        ms: ms,
+        timestamp: ts || "—",
+        weekRaw: safe(getCol(r,"WEEK")),
+        namaLokasi: safe(getCol(r,"Nama Lokasi")),
+        sektorFromForm: safe(getCol(r,"SEKTOR"))
+      };
+    }
+  }
+  console.log("unique ids in form:", Object.keys(latestById).length);
+}
+
+/* main render */
+function render(){
+  // determine set of IDs to show: if masterList available -> use those IDs, else use all ids from form
+  const masterIDs = masterList.map(m=>safe(getCol(m,"ID Mesin"))).filter(x=>x!=="");
+  const useMasterFilter = masterIDs.length>0;
+  const idsToConsider = useMasterFilter ? masterIDs : Object.keys(latestById);
+
+  // reset containers
+  const sudah = {1:[],2:[],3:[],4:[]};
+  const belum = {1:[],2:[],3:[],4:[]};
+  const sektorCount = {};
+
+  // for performance: map master by id
+  const masterById = {};
+  for(const m of masterList) masterById[safe(getCol(m,"ID Mesin"))] = m;
+
+  for(const id of idsToConsider){
+    const master = masterById[id] || {};
+    const sektorMaster = safe(getCol(master,"SEKTOR")) || "";
+    const namaLokasiMaster = safe(getCol(master,"TERMINAL LOCATION")) || safe(getCol(master,"Nama Lokasi")) || "";
+
+    const match = latestById[id];
+    if(match){
+      const wk = parseWeek(match.weekRaw);
+      const sektorFinal = match.sektorFromForm || sektorMaster || "—";
+      const namaLokasiFinal = match.namaLokasi || namaLokasiMaster || "—";
+      sudah[wk].push({ id, sektor: sektorFinal, namaLokasi: namaLokasiFinal, timestamp: match.timestamp, week:`Week ${wk}` });
+      sektorCount[sektorFinal] = (sektorCount[sektorFinal]||0)+1;
+    } else {
+      // belum input -> add to all belum lists (so user sees them in any week card)
+      for(let w=1; w<=4; w++){
+        belum[w].push({ id, sektor: sektorMaster || "—", namaLokasi: namaLokasiMaster || "—", timestamp: "—", week:"-" });
+      }
+    }
+  }
+
+  // render into DOM
+  for(let w=1; w<=4; w++){
+    const elS = document.getElementById("sudahW"+w);
+    const elB = document.getElementById("belumW"+w);
+    if(sudah[w].length===0) elS.innerHTML = "<i>Tidak ada data</i>"; else {
+      elS.innerHTML = sudah[w].map(it=>`<div class="item"><strong>${it.id}</strong> — ${it.sektor}<br>${it.namaLokasi}<br><small>${it.week} • ${it.timestamp}</small></div>`).join("");
+    }
+    if(belum[w].length===0) elB.innerHTML = "<i>Semua mesin terinput</i>"; else {
+      elB.innerHTML = belum[w].map(it=>`<div class="item"><strong>${it.id}</strong> — ${it.sektor}<br>${it.namaLokasi}</div>`).join("");
+    }
+    document.getElementById("countSW"+w).innerText = `Total: ${sudah[w].length} mesin`;
+    document.getElementById("countBW"+w).innerText = `Total: ${belum[w].length} mesin`;
+  }
+
+  // chart
+  const labels = Object.keys(sektorCount);
+  const counts = labels.map(l=>sektorCount[l]);
+  const ctx = document.getElementById("chartSektor").getContext("2d");
+  if(chart) chart.destroy();
+  chart = new Chart(ctx, { type:"pie", data:{ labels: labels.length?labels:["No Data"], datasets:[{ data: counts.length?counts:[1] }]}, options:{responsive:true} });
+
+  console.log("render done: counts:", {sudah1:sudah[1].length, sudah2:sudah[2].length, sudah3:sudah[3].length, sudah4:sudah[4].length});
+}
+
+/* notifications & export */
+function notifyNew(ids){
+  if(!("Notification" in window) || Notification.permission!=="granted") return;
+  const newcomers = ids.filter(id=>!window._notifiedSet?.has(id));
+  if(newcomers.length){
+    new Notification("Mesin baru terinput", { body: newcomers.join(", ") });
+    window._notifiedSet = window._notifiedSet || new Set();
+    newcomers.forEach(i=>window._notifiedSet.add(i));
+  }
+}
+
+document.getElementById("btnRefresh").addEventListener("click", ()=> loadAll());
+document.getElementById("btnExport").addEventListener("click", ()=>{
+  // export combined: one row per master id or per form id if no master
+  const rows = [];
+  const masterIDs = masterList.map(m=>safe(getCol(m,"ID Mesin"))).filter(x=>x!=="");
+  const useMaster = masterIDs.length>0;
+  const ids = useMaster ? masterIDs : Object.keys(latestById);
+  for(const id of ids){
+    const m = (masterList.find(x=>safe(getCol(x,"ID Mesin"))===id) || {});
+    const match = latestById[id];
+    rows.push({
+      Timestamp: match ? match.timestamp : "—",
+      ID_Mesin: id,
+      Nama_Lokasi: match ? match.namaLokasi : (safe(getCol(m,"TERMINAL LOCATION")) || safe(getCol(m,"Nama Lokasi")) || "—"),
+      WEEK: match ? ( "Week " + parseWeek(match.weekRaw) ) : "—",
+      SEKTOR: safe(getCol(m,"SEKTOR")) || (match ? match.sektorFromForm : "—")
     });
-    html += "</table></div>";
-    return html;
+  }
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows);
+  XLSX.utils.book_append_sheet(wb, ws, "Monitoring");
+  XLSX.writeFile(wb, `Monitoring_${new Date().toISOString().slice(0,10)}.xlsx`);
+});
+
+/* main load */
+async function loadAll(){
+  try{
+    await loadMaster();
+    await loadForm();
+    buildLatest();
+    render();
+
+    // notify new (use latestById keys)
+    notifyNew(Object.keys(latestById));
+  }catch(e){
+    console.error("loadAll error", e);
+  }
 }
 
-async function load() {
-    // Load CSV data
-    const dataMesin100CSV = await fetchCSV(DATA_MESIN_URL);
-    const formCSV = await fetchCSV(FORM_DATA_URL);
-
-    const mesin100 = parseCSV(dataMesin100CSV);
-    const formData = parseCSV(formCSV);
-
-    const allowedIDs = mesin100.map(m => m["ID Mesin"]);
-
-    // Filter hanya ID Mesin yang ada dalam list 100 mesin
-    const filtered = formData.filter(d => allowedIDs.includes(d["ID Mesin"]));
-
-    // Kelompokkan berdasarkan WEEK ("Week 1", "Week 2", dst.)
-    const weekGroups = {
-        "Week 1": [],
-        "Week 2": [],
-        "Week 3": [],
-        "Week 4": []
-    };
-
-    filtered.forEach(row => {
-        const w = row["WEEK"];
-        if (weekGroups[w]) weekGroups[w].push(row);
-    });
-
-    // Render ke HTML
-    let finalHTML = "";
-    finalHTML += renderWeek("Week 1", weekGroups["Week 1"]);
-    finalHTML += renderWeek("Week 2", weekGroups["Week 2"]);
-    finalHTML += renderWeek("Week 3", weekGroups["Week 3"]);
-    finalHTML += renderWeek("Week 4", weekGroups["Week 4"]);
-
-    document.getElementById("container").innerHTML = finalHTML;
-}
-
-load();
-
+if("Notification" in window && Notification.permission !== "granted") Notification.requestPermission();
+loadAll();
+setInterval(loadAll, 600000);
 </script>
 </body>
 </html>
