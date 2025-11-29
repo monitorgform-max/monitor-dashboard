@@ -43,9 +43,10 @@
     <div class="card"><h4>W4</h4><div id="belumW4">—</div><div id="countBW4"></div></div>
   </div>
 
-  <div id="chartWrap" style="background:#fff;padding:12px;border-radius:8px;width:200px;height:200px;">
+  <div id="chartWrap" style="background:#fff;padding:12px;border-radius:8px; width:100%; text-align:center;">
   <h4>Grafik per SEKTOR</h4>
-  <canvas id="chartSektor" width="200" height="200"></canvas>
+  <div style="display:inline-block; transform: scale(0.5); transform-origin: top center;">
+    <canvas id="chartSektor"></canvas>
   </div>
 </div>
 
@@ -177,6 +178,7 @@ setInterval(loadAll,600000);
 </script>
 </body>
 </html>
+
 
 
 
