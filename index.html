@@ -51,7 +51,7 @@
 
 <script>
 /* CONFIG */
-const MASTER_CSV = "Data Mesin.csv"; // must exist in repo root (exact name)
+const MASTER_CSV = "Data Mesin.csv"; // harus ada di repo root
 const SHEET_ID = "19FeEccnYkZVAZo0lO-erbgLtJDAalG3IzwaiLympdck";
 const SHEET_NAME = "Form Responses 1";
 const FORM_URL = `https://opensheet.elk.sh/${SHEET_ID}/${encodeURIComponent(SHEET_NAME)}`;
@@ -66,22 +66,15 @@ function getCol(obj, name){
 function safe(v){ return v==null ? "" : String(v).trim(); }
 function parseWeek(raw){
   if(!raw) return 1;
-  const m = String(raw).match(/\d+/);
-  const n = m ? parseInt(m[0],10) : 1;
-  return (!isNaN(n) && n>=1 && n<=4) ? n : 1;
-}
-function tsMs(ts){
-  if(!ts) return 0;
-  const parsed = Date.parse(ts);
-  if(!isNaN(parsed)) return parsed;
-  const alt = Date.parse(ts.replace(" ", "T"));
-  return isNaN(alt) ? 0 : alt;
+  const m = String(raw).match(/(\d)/); // ambil angka 1-4
+  const n = m ? parseInt(m[1],10) : 1;
+  return (n>=1 && n<=4) ? n : 1;
 }
 
 /* state */
-let masterList = []; // array of master rows (may include SEKTOR)
-let formRows = [];   // raw form rows from opensheet
-let latestById = {}; // id -> best form record (latest timestamp)
+let masterList = [];
+let formRows = [];
+let latestById = {};
 let chart = null;
 
 async function loadMaster(){
@@ -105,7 +98,7 @@ async function loadForm(){
   }
 }
 
-/* build latestById from formRows */
+/* build latestById */
 function buildLatest(){
   latestById = {};
   for(const r of formRows){
@@ -118,8 +111,7 @@ function buildLatest(){
         ms: ms,
         timestamp: ts || "—",
         weekRaw: safe(getCol(r,"WEEK")),
-        namaLokasi: safe(getCol(r,"Nama Lokasi")),
-        sektorFromForm: safe(getCol(r,"SEKTOR"))
+        namaLokasi: safe(getCol(r,"Nama Lokasi"))
       };
     }
   }
@@ -128,50 +120,60 @@ function buildLatest(){
 
 /* main render */
 function render(){
-  // determine set of IDs to show: if masterList available -> use those IDs, else use all ids from form
-  const masterIDs = masterList.map(m=>safe(getCol(m,"ID Mesin"))).filter(x=>x!=="");
-  const useMasterFilter = masterIDs.length>0;
-  const idsToConsider = useMasterFilter ? masterIDs : Object.keys(latestById);
-
-  // reset containers
   const sudah = {1:[],2:[],3:[],4:[]};
   const belum = {1:[],2:[],3:[],4:[]};
   const sektorCount = {};
 
-  // for performance: map master by id
+  // buat map master by id
   const masterById = {};
   for(const m of masterList) masterById[safe(getCol(m,"ID Mesin"))] = m;
 
-  for(const id of idsToConsider){
-    const master = masterById[id] || {};
-    const sektorMaster = safe(getCol(master,"SEKTOR")) || "";
-    const namaLokasiMaster = safe(getCol(master,"TERMINAL LOCATION")) || safe(getCol(master,"Nama Lokasi")) || "";
+  // loop semua master
+  for(const m of masterList){
+    const id = safe(getCol(m,"ID Mesin"));
+    const sektorMaster = safe(getCol(m,"SEKTOR")) || "—";
+    const namaLokasiMaster = safe(getCol(m,"Nama Lokasi")) || "—";
 
     const match = latestById[id];
-    if(match){
-      const wk = parseWeek(match.weekRaw);
-      const sektorFinal = match.sektorFromForm || sektorMaster || "—";
-      const namaLokasiFinal = match.namaLokasi || namaLokasiMaster || "—";
-      sudah[wk].push({ id, sektor: sektorFinal, namaLokasi: namaLokasiFinal, timestamp: match.timestamp, week:`Week ${wk}` });
-      sektorCount[sektorFinal] = (sektorCount[sektorFinal]||0)+1;
-    } else {
-      // belum input -> add to all belum lists (so user sees them in any week card)
-      for(let w=1; w<=4; w++){
-        belum[w].push({ id, sektor: sektorMaster || "—", namaLokasi: namaLokasiMaster || "—", timestamp: "—", week:"-" });
+
+    for(let w=1; w<=4; w++){
+      if(match && parseWeek(match.weekRaw) === w){
+        // sudah input
+        sudah[w].push({
+          id,
+          sektor: sektorMaster,
+          namaLokasi: match.namaLokasi || namaLokasiMaster,
+          timestamp: match.timestamp,
+          week: `Week ${w}`
+        });
+        sektorCount[sektorMaster] = (sektorCount[sektorMaster]||0)+1;
+      } else {
+        // belum input
+        // hanya masukkan jika belum ada form untuk week itu
+        // kalau sudah input week lain, tetap bisa muncul di week lain
+        if(!match || parseWeek(match.weekRaw) !== w){
+          belum[w].push({
+            id,
+            sektor: sektorMaster,
+            namaLokasi: namaLokasiMaster,
+            timestamp: "—",
+            week: "-"
+          });
+        }
       }
     }
   }
 
-  // render into DOM
+  // render DOM
   for(let w=1; w<=4; w++){
     const elS = document.getElementById("sudahW"+w);
     const elB = document.getElementById("belumW"+w);
-    if(sudah[w].length===0) elS.innerHTML = "<i>Tidak ada data</i>"; else {
-      elS.innerHTML = sudah[w].map(it=>`<div class="item"><strong>${it.id}</strong> — ${it.sektor}<br>${it.namaLokasi}<br><small>${it.week} • ${it.timestamp}</small></div>`).join("");
-    }
-    if(belum[w].length===0) elB.innerHTML = "<i>Semua mesin terinput</i>"; else {
-      elB.innerHTML = belum[w].map(it=>`<div class="item"><strong>${it.id}</strong> — ${it.sektor}<br>${it.namaLokasi}</div>`).join("");
-    }
+    elS.innerHTML = sudah[w].length
+      ? sudah[w].map(it=>`<div class="item"><strong>${it.id}</strong> — ${it.sektor}<br>${it.namaLokasi}<br><small>${it.week} • ${it.timestamp}</small></div>`).join("")
+      : "<i>Tidak ada data</i>";
+    elB.innerHTML = belum[w].length
+      ? belum[w].map(it=>`<div class="item"><strong>${it.id}</strong> — ${it.sektor}<br>${it.namaLokasi}</div>`).join("")
+      : "<i>Semua mesin terinput</i>";
     document.getElementById("countSW"+w).innerText = `Total: ${sudah[w].length} mesin`;
     document.getElementById("countBW"+w).innerText = `Total: ${belum[w].length} mesin`;
   }
@@ -181,45 +183,51 @@ function render(){
   const counts = labels.map(l=>sektorCount[l]);
   const ctx = document.getElementById("chartSektor").getContext("2d");
   if(chart) chart.destroy();
-  chart = new Chart(ctx, { type:"pie", data:{ labels: labels.length?labels:["No Data"], datasets:[{ data: counts.length?counts:[1] }]}, options:{responsive:true} });
+  chart = new Chart(ctx, {
+    type:"pie",
+    data:{ labels: labels.length?labels:["No Data"], datasets:[{ data: counts.length?counts:[1] }]},
+    options:{responsive:true}
+  });
 
   console.log("render done: counts:", {sudah1:sudah[1].length, sudah2:sudah[2].length, sudah3:sudah[3].length, sudah4:sudah[4].length});
 }
 
-/* notifications & export */
-function notifyNew(ids){
-  if(!("Notification" in window) || Notification.permission!=="granted") return;
-  const newcomers = ids.filter(id=>!window._notifiedSet?.has(id));
-  if(newcomers.length){
-    new Notification("Mesin baru terinput", { body: newcomers.join(", ") });
-    window._notifiedSet = window._notifiedSet || new Set();
-    newcomers.forEach(i=>window._notifiedSet.add(i));
-  }
-}
-
-document.getElementById("btnRefresh").addEventListener("click", ()=> loadAll());
+/* export */
 document.getElementById("btnExport").addEventListener("click", ()=>{
-  // export combined: one row per master id or per form id if no master
   const rows = [];
-  const masterIDs = masterList.map(m=>safe(getCol(m,"ID Mesin"))).filter(x=>x!=="");
-  const useMaster = masterIDs.length>0;
-  const ids = useMaster ? masterIDs : Object.keys(latestById);
-  for(const id of ids){
-    const m = (masterList.find(x=>safe(getCol(x,"ID Mesin"))===id) || {});
+  for(const m of masterList){
+    const id = safe(getCol(m,"ID Mesin"));
+    const sektorMaster = safe(getCol(m,"SEKTOR")) || "—";
+    const namaLokasiMaster = safe(getCol(m,"Nama Lokasi")) || "—";
     const match = latestById[id];
-    rows.push({
-      Timestamp: match ? match.timestamp : "—",
-      ID_Mesin: id,
-      Nama_Lokasi: match ? match.namaLokasi : (safe(getCol(m,"TERMINAL LOCATION")) || safe(getCol(m,"Nama Lokasi")) || "—"),
-      WEEK: match ? ( "Week " + parseWeek(match.weekRaw) ) : "—",
-      SEKTOR: safe(getCol(m,"SEKTOR")) || (match ? match.sektorFromForm : "—")
-    });
+    if(match){
+      const wk = parseWeek(match.weekRaw);
+      rows.push({
+        Timestamp: match.timestamp,
+        ID_Mesin: id,
+        Nama_Lokasi: match.namaLokasi || namaLokasiMaster,
+        WEEK: `Week ${wk}`,
+        SEKTOR: sektorMaster
+      });
+    } else {
+      // belum input
+      rows.push({
+        Timestamp: "—",
+        ID_Mesin: id,
+        Nama_Lokasi: namaLokasiMaster,
+        WEEK: "-",
+        SEKTOR: sektorMaster
+      });
+    }
   }
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows);
   XLSX.utils.book_append_sheet(wb, ws, "Monitoring");
   XLSX.writeFile(wb, `Monitoring_${new Date().toISOString().slice(0,10)}.xlsx`);
 });
+
+/* refresh */
+document.getElementById("btnRefresh").addEventListener("click", ()=> loadAll());
 
 /* main load */
 async function loadAll(){
@@ -228,15 +236,11 @@ async function loadAll(){
     await loadForm();
     buildLatest();
     render();
-
-    // notify new (use latestById keys)
-    notifyNew(Object.keys(latestById));
   }catch(e){
     console.error("loadAll error", e);
   }
 }
 
-if("Notification" in window && Notification.permission !== "granted") Notification.requestPermission();
 loadAll();
 setInterval(loadAll, 600000);
 </script>
