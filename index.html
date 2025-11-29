@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dashboard Mesin</title>
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    h1 { margin-bottom: 5px; }
+    .week-box { margin-bottom: 40px; padding: 15px; border: 1px solid #ccc; border-radius: 10px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 10px; }
+    th, td { border: 1px solid #888; padding: 6px; text-align: left; }
+    th { background: #f2f2f2 }
+  </style>
+</head>
+
+<body>
+
+<h1>Dashboard Mesin — Mingguan</h1>
+<p>Auto update dari GitHub (no cache)</p>
+
+<div id="container"></div>
+
+<script>
+// =============== CONFIG =================
+const DATA_MESIN_URL = "https://raw.githubusercontent.com/USERNAME/REPO/main/data_mesin_100.csv";
+const FORM_DATA_URL  = "https://raw.githubusercontent.com/USERNAME/REPO/main/Data%20Mesin.csv";
+// ========================================
+
+// Fetch CSV tanpa cache
+async function fetchCSV(url) {
+    const res = await fetch(url + "?t=" + Date.now());
+    return await res.text();
+}
+
+// Convert CSV ? array object
+function parseCSV(text) {
+    const rows = text.trim().split("\n").map(r => r.split(","));
+    const header = rows[0].map(h => h.trim());
+    return rows.slice(1).map(row => {
+        let obj = {};
+        row.forEach((val, i) => obj[header[i]] = val.trim());
+        return obj;
+    });
+}
+
+// Render data per week
+function renderWeek(weekLabel, data) {
+    let html = `
+        <div class="week-box">
+            <h2>${weekLabel}</h2>
+            <p>Total: ${data.length} mesin</p>
+            <table>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>ID Mesin</th>
+                    <th>Nama Lokasi</th>
+                    <th>Week</th>
+                    <th>Sektor</th>
+                </tr>
+    `;
+    data.forEach(d => {
+        html += `
+            <tr>
+                <td>${d["Timestamp"] || "-"}</td>
+                <td>${d["ID Mesin"]}</td>
+                <td>${d["Nama Lokasi"]}</td>
+                <td>${d["WEEK"]}</td>
+                <td>${d["SEKTOR"]}</td>
+            </tr>
+        `;
+    });
+    html += "</table></div>";
+    return html;
+}
+
+async function load() {
+    // Load CSV data
+    const dataMesin100CSV = await fetchCSV(DATA_MESIN_URL);
+    const formCSV = await fetchCSV(FORM_DATA_URL);
+
+    const mesin100 = parseCSV(dataMesin100CSV);
+    const formData = parseCSV(formCSV);
+
+    const allowedIDs = mesin100.map(m => m["ID Mesin"]);
+
+    // Filter hanya ID Mesin yang ada dalam list 100 mesin
+    const filtered = formData.filter(d => allowedIDs.includes(d["ID Mesin"]));
+
+    // Kelompokkan berdasarkan WEEK ("Week 1", "Week 2", dst.)
+    const weekGroups = {
+        "Week 1": [],
+        "Week 2": [],
+        "Week 3": [],
+        "Week 4": []
+    };
+
+    filtered.forEach(row => {
+        const w = row["WEEK"];
+        if (weekGroups[w]) weekGroups[w].push(row);
+    });
+
+    // Render ke HTML
+    let finalHTML = "";
+    finalHTML += renderWeek("Week 1", weekGroups["Week 1"]);
+    finalHTML += renderWeek("Week 2", weekGroups["Week 2"]);
+    finalHTML += renderWeek("Week 3", weekGroups["Week 3"]);
+    finalHTML += renderWeek("Week 4", weekGroups["Week 4"]);
+
+    document.getElementById("container").innerHTML = finalHTML;
+}
+
+load();
+
+</script>
+</body>
+</html>
