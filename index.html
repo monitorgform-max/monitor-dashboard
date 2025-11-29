@@ -50,199 +50,130 @@
 </div>
 
 <script>
-/* CONFIG */
-const MASTER_CSV = "Data Mesin.csv"; // harus ada di repo root
+const MASTER_CSV = "Data Mesin.csv";
 const SHEET_ID = "19FeEccnYkZVAZo0lO-erbgLtJDAalG3IzwaiLympdck";
 const SHEET_NAME = "Form Responses 1";
 const FORM_URL = `https://opensheet.elk.sh/${SHEET_ID}/${encodeURIComponent(SHEET_NAME)}`;
 
-/* helpers */
-function getCol(obj, name){
+function getCol(obj,name){
   if(!obj) return "";
   const target = name.toLowerCase().trim();
-  for(const k in obj) if(k.toLowerCase().trim() === target) return obj[k];
+  for(const k in obj) if(k.toLowerCase().trim()===target) return obj[k];
   return "";
 }
-function safe(v){ return v==null ? "" : String(v).trim(); }
-function parseWeek(raw){
-  if(!raw) return 1;
-  const m = String(raw).match(/(\d)/); // ambil angka 1-4
-  const n = m ? parseInt(m[1],10) : 1;
-  return (n>=1 && n<=4) ? n : 1;
-}
+function safe(v){ return v==null?"":String(v).trim();}
+function parseWeek(raw){ const m=String(raw).match(/(\d)/); const n=m?parseInt(m[1],10):1; return (n>=1&&n<=4)?n:1;}
 
-/* state */
-let masterList = [];
-let formRows = [];
-let latestById = {};
-let chart = null;
+let masterList=[], formRows=[], chart=null;
 
 async function loadMaster(){
   return new Promise(resolve=>{
-    Papa.parse(MASTER_CSV, { download:true, header:true, skipEmptyLines:true,
-      complete: r => { masterList = Array.isArray(r.data) ? r.data.filter(x=>safe(getCol(x,"ID Mesin"))!=="") : []; console.log("master count:", masterList.length); resolve(); },
-      error: e => { console.warn("failed load master:", e); masterList = []; resolve(); }
+    Papa.parse(MASTER_CSV,{download:true,header:true,skipEmptyLines:true,
+      complete:r=>{ masterList = Array.isArray(r.data)? r.data.filter(x=>safe(getCol(x,"ID Mesin"))!=="") : []; console.log("master count:", masterList.length); resolve(); },
+      error:e=>{ console.warn("failed load master:",e); masterList=[]; resolve(); }
     });
   });
 }
 
 async function loadForm(){
   try{
-    const res = await fetch(FORM_URL, {cache:"no-store"});
+    const res = await fetch(FORM_URL,{cache:"no-store"});
     formRows = await res.json();
-    if(!Array.isArray(formRows)) formRows = [];
-    console.log("form rows:", formRows.length);
-  }catch(e){
-    console.error("failed fetch form:", e);
-    formRows = [];
-  }
+    if(!Array.isArray(formRows)) formRows=[];
+    console.log("form rows:",formRows.length);
+  }catch(e){ console.error("failed fetch form:",e); formRows=[]; }
 }
 
-/* build latestById */
-function buildLatest(){
-  latestById = {};
-  for(const r of formRows){
-    const id = safe(getCol(r,"ID Mesin"));
-    if(!id) continue;
-    const ts = safe(getCol(r,"Timestamp"));
-    const ms = ts ? Date.parse(ts) || (Date.parse(ts.replace(" ","T"))||0) : 0;
-    if(!(id in latestById) || ms > latestById[id].ms){
-      latestById[id] = {
-        ms: ms,
-        timestamp: ts || "—",
-        weekRaw: safe(getCol(r,"WEEK")),
-        namaLokasi: safe(getCol(r,"Nama Lokasi"))
-      };
-    }
-  }
-  console.log("unique ids in form:", Object.keys(latestById).length);
-}
-
-/* main render */
 function render(){
-  const sudah = {1:[],2:[],3:[],4:[]};
-  const belum = {1:[],2:[],3:[],4:[]};
-  const sektorCount = {};
+  const sudah={1:[],2:[],3:[],4:[]};
+  const belum={1:[],2:[],3:[],4:[]};
+  const sektorCount={};
 
-  // buat map master by id
-  const masterById = {};
-  for(const m of masterList) masterById[safe(getCol(m,"ID Mesin"))] = m;
+  for(let w=1; w<=4; w++){
+    const masterThisWeek = masterList.filter(m=>parseWeek(getCol(m,"WEEK"))===w);
+    for(const m of masterThisWeek){
+      const id = safe(getCol(m,"ID Mesin"));
+      const sektorMaster = safe(getCol(m,"SEKTOR"))||"—";
+      const namaLokasiMaster = safe(getCol(m,"Nama Lokasi"))||"—";
 
-  // loop semua master
-  for(const m of masterList){
-    const id = safe(getCol(m,"ID Mesin"));
-    const sektorMaster = safe(getCol(m,"SEKTOR")) || "—";
-    const namaLokasiMaster = safe(getCol(m,"Nama Lokasi")) || "—";
+      const match = formRows.find(r=>safe(getCol(r,"ID Mesin"))===id && parseWeek(getCol(r,"WEEK"))===w);
 
-    const match = latestById[id];
-
-    for(let w=1; w<=4; w++){
-      if(match && parseWeek(match.weekRaw) === w){
-        // sudah input
+      if(match){
         sudah[w].push({
           id,
           sektor: sektorMaster,
-          namaLokasi: match.namaLokasi || namaLokasiMaster,
-          timestamp: match.timestamp,
-          week: `Week ${w}`
+          namaLokasi: safe(getCol(match,"Nama Lokasi"))||namaLokasiMaster,
+          timestamp: safe(getCol(match,"Timestamp"))||"—",
+          week:`Week ${w}`
         });
-        sektorCount[sektorMaster] = (sektorCount[sektorMaster]||0)+1;
-      } else {
-        // belum input
-        // hanya masukkan jika belum ada form untuk week itu
-        // kalau sudah input week lain, tetap bisa muncul di week lain
-        if(!match || parseWeek(match.weekRaw) !== w){
-          belum[w].push({
-            id,
-            sektor: sektorMaster,
-            namaLokasi: namaLokasiMaster,
-            timestamp: "—",
-            week: "-"
-          });
-        }
+        sektorCount[sektorMaster]=(sektorCount[sektorMaster]||0)+1;
+      }else{
+        belum[w].push({
+          id,
+          sektor: sektorMaster,
+          namaLokasi: namaLokasiMaster,
+          timestamp:"—",
+          week:`Week ${w}`
+        });
       }
     }
   }
 
-  // render DOM
   for(let w=1; w<=4; w++){
-    const elS = document.getElementById("sudahW"+w);
-    const elB = document.getElementById("belumW"+w);
-    elS.innerHTML = sudah[w].length
+    document.getElementById("sudahW"+w).innerHTML = sudah[w].length
       ? sudah[w].map(it=>`<div class="item"><strong>${it.id}</strong> — ${it.sektor}<br>${it.namaLokasi}<br><small>${it.week} • ${it.timestamp}</small></div>`).join("")
       : "<i>Tidak ada data</i>";
-    elB.innerHTML = belum[w].length
+    document.getElementById("belumW"+w).innerHTML = belum[w].length
       ? belum[w].map(it=>`<div class="item"><strong>${it.id}</strong> — ${it.sektor}<br>${it.namaLokasi}</div>`).join("")
       : "<i>Semua mesin terinput</i>";
     document.getElementById("countSW"+w).innerText = `Total: ${sudah[w].length} mesin`;
     document.getElementById("countBW"+w).innerText = `Total: ${belum[w].length} mesin`;
   }
 
-  // chart
   const labels = Object.keys(sektorCount);
   const counts = labels.map(l=>sektorCount[l]);
   const ctx = document.getElementById("chartSektor").getContext("2d");
   if(chart) chart.destroy();
-  chart = new Chart(ctx, {
+  chart = new Chart(ctx,{
     type:"pie",
-    data:{ labels: labels.length?labels:["No Data"], datasets:[{ data: counts.length?counts:[1] }]},
+    data:{labels: labels.length?labels:["No Data"], datasets:[{data: counts.length?counts:[1]}]},
     options:{responsive:true}
   });
 
-  console.log("render done: counts:", {sudah1:sudah[1].length, sudah2:sudah[2].length, sudah3:sudah[3].length, sudah4:sudah[4].length});
+  console.log("render done counts:",{sudah1:sudah[1].length,sudah2:sudah[2].length,sudah3:sudah[3].length,sudah4:sudah[4].length});
 }
 
-/* export */
-document.getElementById("btnExport").addEventListener("click", ()=>{
-  const rows = [];
-  for(const m of masterList){
-    const id = safe(getCol(m,"ID Mesin"));
-    const sektorMaster = safe(getCol(m,"SEKTOR")) || "—";
-    const namaLokasiMaster = safe(getCol(m,"Nama Lokasi")) || "—";
-    const match = latestById[id];
-    if(match){
-      const wk = parseWeek(match.weekRaw);
-      rows.push({
-        Timestamp: match.timestamp,
-        ID_Mesin: id,
-        Nama_Lokasi: match.namaLokasi || namaLokasiMaster,
-        WEEK: `Week ${wk}`,
-        SEKTOR: sektorMaster
-      });
-    } else {
-      // belum input
-      rows.push({
-        Timestamp: "—",
-        ID_Mesin: id,
-        Nama_Lokasi: namaLokasiMaster,
-        WEEK: "-",
-        SEKTOR: sektorMaster
-      });
+document.getElementById("btnRefresh").addEventListener("click",()=>loadAll());
+document.getElementById("btnExport").addEventListener("click",()=>{
+  const rows=[];
+  for(let w=1; w<=4; w++){
+    const masterThisWeek = masterList.filter(m=>parseWeek(getCol(m,"WEEK"))===w);
+    for(const m of masterThisWeek){
+      const id = safe(getCol(m,"ID Mesin"));
+      const sektorMaster = safe(getCol(m,"SEKTOR"))||"—";
+      const namaLokasiMaster = safe(getCol(m,"Nama Lokasi"))||"—";
+      const match = formRows.find(r=>safe(getCol(r,"ID Mesin"))===id && parseWeek(getCol(r,"WEEK"))===w);
+      if(match){
+        rows.push({Timestamp:safe(getCol(match,"Timestamp"))||"—",ID_Mesin:id,Nama_Lokasi:safe(getCol(match,"Nama Lokasi"))||namaLokasiMaster,WEEK:`Week ${w}`,SEKTOR:sektorMaster});
+      }else{
+        rows.push({Timestamp:"—",ID_Mesin:id,Nama_Lokasi:namaLokasiMaster,WEEK:`Week ${w}`,SEKTOR:sektorMaster});
+      }
     }
   }
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows);
-  XLSX.utils.book_append_sheet(wb, ws, "Monitoring");
-  XLSX.writeFile(wb, `Monitoring_${new Date().toISOString().slice(0,10)}.xlsx`);
+  XLSX.utils.book_append_sheet(wb,ws,"Monitoring");
+  XLSX.writeFile(wb,`Monitoring_${new Date().toISOString().slice(0,10)}.xlsx`);
 });
 
-/* refresh */
-document.getElementById("btnRefresh").addEventListener("click", ()=> loadAll());
-
-/* main load */
 async function loadAll(){
-  try{
-    await loadMaster();
-    await loadForm();
-    buildLatest();
-    render();
-  }catch(e){
-    console.error("loadAll error", e);
-  }
+  await loadMaster();
+  await loadForm();
+  render();
 }
 
 loadAll();
-setInterval(loadAll, 600000);
+setInterval(loadAll,600000);
 </script>
 </body>
 </html>
